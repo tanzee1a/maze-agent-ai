@@ -34,7 +34,6 @@ def render_agent_path(h_walls, v_walls, path, start, goal, out_path="results/age
     except Exception:
         font = ImageFont.load_default()
 
-    # draw cells
     for row in range(GRID):
         for col in range(GRID):
             x0 = col * CELL_PX
@@ -51,7 +50,6 @@ def render_agent_path(h_walls, v_walls, path, start, goal, out_path="results/age
 
             draw.rectangle([x0, y0, x1, y1], fill=fill)
 
-    # draw horizontal walls
     for wi in range(GRID + 1):
         for col in range(GRID):
             if h_walls[wi, col]:
@@ -65,7 +63,6 @@ def render_agent_path(h_walls, v_walls, path, start, goal, out_path="results/age
                     fill=WALL_COLOR,
                 )
 
-    # draw vertical walls
     for row in range(GRID):
         for wi in range(GRID + 1):
             if v_walls[row, wi]:
@@ -83,11 +80,9 @@ def render_agent_path(h_walls, v_walls, path, start, goal, out_path="results/age
         r, c = cell
         return (c * CELL_PX + CELL_PX // 2, r * CELL_PX + CELL_PX // 2)
 
-    # draw path lines
     for i in range(len(path) - 1):
         draw.line([center(path[i]), center(path[i + 1])], fill=PATH_COLOR, width=3)
 
-    # draw step numbers
     for i, (r, c) in enumerate(path):
         x = c * CELL_PX + 2
         y = r * CELL_PX + 2
@@ -125,6 +120,9 @@ class World:
     def ask_hazard(self, row, col):
         return get_hazard(row, col, self.hazards)
 
+    def check_confusion(self, row, col):
+        return self.hazards.get((row, col)) == Hazard.CONFUSION
+
 
 class BlindAgent:
     def __init__(self, world, start, goal):
@@ -139,20 +137,29 @@ class BlindAgent:
         self.steps = 0
         self.deaths = 0
         self.teleports = 0
+        self.confused = False
 
         self.known_open = defaultdict(set)
         self.known_blocked = defaultdict(set)
         self.known_hazards = {}
 
+    def actual_direction(self, direction):
+        if not self.confused:
+            return direction
+        return OPPOSITE[direction]
+
     def try_move(self, direction):
         row, col = self.position
-        dr, dc = DIRECTIONS[direction]
+
+        real_direction = self.actual_direction(direction)
+
+        dr, dc = DIRECTIONS[real_direction]
         next_cell = (row + dr, col + dc)
 
-        allowed = self.world.ask_wall(row, col, direction)
+        allowed = self.world.ask_wall(row, col, real_direction)
 
         if not allowed:
-            self.known_blocked[(row, col)].add(direction)
+            self.known_blocked[(row, col)].add(real_direction)
             self.wall_hits += 1
             return False
 
@@ -177,11 +184,14 @@ class BlindAgent:
             self.deaths += 1
             self.position = self.start
             self.path.append(self.start)
+            return
 
-        elif hazard == Hazard.CONFUSION:
-            print(f"CONFUSION at {self.position}")
+        if hazard == Hazard.CONFUSION:
+            self.confused = not self.confused
+            print(f"CONFUSION at {self.position} -> confused = {self.confused}")
+            return
 
-        elif hazard in {Hazard.TP_GREEN, Hazard.TP_YELLOW, Hazard.TP_PURPLE}:
+        if hazard in {Hazard.TP_GREEN, Hazard.TP_YELLOW, Hazard.TP_PURPLE}:
             print(f"TELEPORT at {self.position}")
             matches = [
                 cell for cell, hz in self.world.hazards.items()
@@ -193,6 +203,10 @@ class BlindAgent:
                 self.position = destination
                 self.path.append(destination)
 
+                dst_hazard = self.world.ask_hazard(*destination)
+                if dst_hazard is not None:
+                    self.known_hazards[destination] = dst_hazard
+
     def dfs(self, cell):
         self.position = cell
         self.visited.add(cell)
@@ -201,8 +215,9 @@ class BlindAgent:
             return True
 
         for direction in ["up", "right", "down", "left"]:
+            real_direction = self.actual_direction(direction)
             row, col = cell
-            dr, dc = DIRECTIONS[direction]
+            dr, dc = DIRECTIONS[real_direction]
             next_cell = (row + dr, col + dc)
 
             if next_cell in self.visited:
@@ -226,9 +241,17 @@ class BlindAgent:
                 if found:
                     return True
 
+            # only do simple backtrack if still on the expected moved-to cell
             if current == next_cell:
-                back_dir = OPPOSITE[direction]
-                self.try_move(back_dir)
+                back_dir = OPPOSITE[real_direction]
+
+                # convert back_dir into intended direction under current confusion state
+                if self.confused:
+                    intended_back = OPPOSITE[back_dir]
+                else:
+                    intended_back = back_dir
+
+                self.try_move(intended_back)
                 self.position = cell
 
         return False
@@ -244,11 +267,12 @@ class BlindAgent:
         print(f"Wall hits     : {self.wall_hits}")
         print(f"Deaths        : {self.deaths}")
         print(f"Teleports     : {self.teleports}")
+        print(f"Confused end  : {self.confused}")
         print(f"Steps moved   : {self.steps}")
         print(f"Visited cells : {len(self.visited)}")
         print(f"Known hazards : {len(self.known_hazards)}")
-
         print(f"\nPath length: {len(self.path)}")
+
         return found
 
 
