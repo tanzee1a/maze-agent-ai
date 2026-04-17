@@ -137,7 +137,7 @@ def _classify_color(r, g, b):
     """Map an average RGB value to a Hazard type, or None if unrecognised."""
 
     # confusion
-    if 155 <= r <= 195 and 110 <= g <= 145 and 55 <= b <= 82:
+    if 155 <= r <= 195 and 110 <= g <= 160 and 55 <= b <= 85:
         return Hazard.CONFUSION
 
     # fire
