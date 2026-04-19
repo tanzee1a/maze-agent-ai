@@ -376,3 +376,4 @@ if __name__ == "__main__":
         render_path(h_walls, v_walls, agent.path, start, goal,
                     run=current_run,
                     optimized=True)  # blue path, just endpoints labeled
+    
