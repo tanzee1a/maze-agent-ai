@@ -572,6 +572,31 @@ class HybridAgent:
     # PLAN TURN
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _plan_to_goal(self) -> List[int]:
+        """
+        Plan a route from current position to the known goal using the
+        learned map. Prefers strict (safe-moves-only) A*, then relaxes.
+
+        Returns [] if goal is unknown, current position is unknown, or no
+        route can be found even under the relaxed model.
+        """
+        if self.goal_pos is None or self.current_pos is None:
+            return []
+        if self.current_pos == self.goal_pos:
+            return []
+
+        # Strict: only traverse edges we have confirmed safe by experience.
+        path = self._astar(self.current_pos, self.goal_pos, require_safe=True)
+        if path:
+            return path
+
+        # Relaxed: allow any edge that isn't a known wall or known-dead cell.
+        # We may hit an untried wall or an unseen fire cell, but that's
+        # recoverable (wall learning, respawn on death) -- far better than
+        # wandering randomly forever with a known goal.
+        path = self._astar(self.current_pos, self.goal_pos, require_safe=False)
+        return path
+
     def plan_turn(self, last_result=None) -> List[int]:
         if last_result is not None:
             self._process_result(last_result)
@@ -581,6 +606,20 @@ class HybridAgent:
 
         # Phase 2: replay known successful path, but batch only trusted segments
         if self.phase == 2:
+            # If the replay queue ran out (or a prior turn cleared it because
+            # something unexpected happened), try to replan directly to the
+            # goal from wherever we are now. Staying in phase 2 avoids
+            # collapsing into aimless BFS exploration.
+            if not self.action_queue:
+                replanned = self._plan_to_goal()
+                if replanned:
+                    self.action_queue = replanned
+                    print(
+                        f"[REPLAY REPLAN] "
+                        f"pos={self.current_pos} → goal={self.goal_pos} "
+                        f"steps={len(replanned)}"
+                    )
+
             if self.action_queue:
                 trusted = self._trusted_prefix(self.action_queue, max_len=5)
 
@@ -604,13 +643,26 @@ class HybridAgent:
                 )
                 return self._submit([next_step])
 
-            # Replay finished or failed; fall back to cautious exploration
+            # Replay finished or failed AND replan found nothing usable.
+            # Fall back to cautious exploration.
             self.phase = 1
             self.action_queue = []
 
         # Phase 1: cautious exploration = 1 action per turn
         if not self.action_queue:
             self.action_queue = self._bfs_explore()
+
+        # Exploration exhausted but goal is known → head there directly.
+        # Prevents the pathological "random walk until timeout" state that
+        # triggers once the maze is fully mapped and all-cells-visited.
+        if not self.action_queue and self.goal_pos is not None:
+            self.action_queue = self._plan_to_goal()
+            if self.action_queue:
+                print(
+                    f"[PHASE1 GOAL-SEEK] "
+                    f"pos={self.current_pos} → goal={self.goal_pos} "
+                    f"steps={len(self.action_queue)}"
+                )
 
         if self.action_queue:
             return self._submit([self.action_queue.pop(0)])
