@@ -15,6 +15,13 @@ PLANNER_ACTIONS = [ACTION_UP, ACTION_DOWN, ACTION_LEFT, ACTION_RIGHT, ACTION_WAI
 
 INVERT = {0: 1, 1: 0, 2: 3, 3: 2}
 
+OPPOSITE = {
+    ACTION_UP: ACTION_DOWN,
+    ACTION_DOWN: ACTION_UP,
+    ACTION_LEFT: ACTION_RIGHT,
+    ACTION_RIGHT: ACTION_LEFT,
+}
+
 DELTAS = {
     ACTION_UP:    (-1,  0),
     ACTION_DOWN:  ( 1,  0),
@@ -46,6 +53,7 @@ class HybridAgent:
         self.visited:         Set[Tuple] = set()  # global — for A* and metrics
         self.episode_visited: Set[Tuple] = set()  # per-episode — for BFS frontier
         self.episode_world_actions: List[int] = []
+        self.safe_moves: Set[Tuple[int, int, int]] = set()
 
         # ── Q-table ───────────────────────────────────────────────────────────
         self.q_table = np.zeros((GRID, GRID, 4), dtype=np.float32)
@@ -107,6 +115,26 @@ class HybridAgent:
 
         if self.phase == 2 and self.optimal_path:
             self.action_queue = list(self.optimal_path)
+
+    def _record_safe_move(
+        self,
+        from_pos: Optional[Tuple[int, int]],
+        action: Optional[int],
+        to_pos: Tuple[int, int],
+        teleported: bool = False
+    ) -> None:
+        if from_pos is None or action not in MOVE_ACTIONS:
+            return
+
+        fr, fc = from_pos
+        tr, tc = to_pos
+
+        # forward move is known safe because it just happened
+        self.safe_moves.add((fr, fc, action))
+
+        # if it was a normal adjacent move, reverse direction is also safe
+        if not teleported and abs(fr - tr) + abs(fc - tc) == 1:
+            self.safe_moves.add((tr, tc, OPPOSITE[action]))
 
     def _trusted_prefix(self, path: List[int], max_len: int = 5) -> List[int]:
         """
@@ -176,7 +204,8 @@ class HybridAgent:
         phase = self._phase_at(tmod20)
         return cell in self.dead_cells_by_phase[phase]
 
-    def _transition(self, r: int, c: int, tmod20: int, action: int, ignore_fire: bool = False):
+    def _transition(self, r: int, c: int, tmod20: int, action: int,
+                ignore_fire: bool = False, require_safe: bool = False):
         """
         Simulate one planner action in the agent's internal model.
 
@@ -187,8 +216,11 @@ class HybridAgent:
 
         if action == ACTION_WAIT:
             return (r, c, next_t)
-
+        
         if (r, c, action) in self.walls:
+            return None
+
+        if require_safe and action != ACTION_WAIT and (r, c, action) not in self.safe_moves:
             return None
 
         dr, dc = DELTAS[action]
@@ -208,10 +240,11 @@ class HybridAgent:
 
         return (nr, nc, next_t)
 
-    def _neighbors_time(self, r: int, c: int, tmod20: int, ignore_fire: bool = False) -> List[Tuple[int, int, int, int]]:
+    def _neighbors_time(self, r: int, c: int, tmod20: int,
+                    ignore_fire: bool = False, require_safe: bool = False) -> List[Tuple[int, int, int, int]]:
         out = []
         for action in PLANNER_ACTIONS:
-            nxt = self._transition(r, c, tmod20, action, ignore_fire)
+            nxt = self._transition(r, c, tmod20, action, ignore_fire, require_safe)
             if nxt is not None:
                 nr, nc, nt = nxt
                 out.append((nr, nc, nt, action))
@@ -295,11 +328,21 @@ class HybridAgent:
     # PHASE 2 — A*
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _astar(self, start: Tuple, goal: Tuple, ignore_fire=False) -> List[int]:
+    def _astar(
+        self,
+        start: Tuple,
+        goal: Tuple,
+        start_tmod20: Optional[int] = None,
+        ignore_fire: bool = False,
+        require_safe: bool = False
+    ) -> List[int]:
         if not start or not goal:
             return []
 
-        start_t = self._current_tmod20()
+        if start_tmod20 is None:
+            start_t = self._current_tmod20()
+        else:
+            start_t = start_tmod20 % 20
 
         def h(r, c):
             return abs(r - goal[0]) + abs(c - goal[1])
@@ -318,7 +361,7 @@ class HybridAgent:
                 continue
             best_g[state] = g
 
-            for nr, nc, nt, action in self._neighbors_time(r, c, tmod20, ignore_fire):
+            for nr, nc, nt, action in self._neighbors_time(r, c, tmod20, ignore_fire, require_safe):
                 ng = g + 1
                 next_state = (nr, nc, nt)
 
@@ -361,8 +404,23 @@ class HybridAgent:
             if overflow > 0:
                 successful_trace = successful_trace[:-overflow]
 
-            if not self.optimal_path or len(successful_trace) < len(self.optimal_path):
-                self.optimal_path = successful_trace
+            # Try to compress the route using the currently known map,
+            # starting from the reset state of a new episode (time = 0).
+            compressed = []
+            if self.start_pos is not None and self.goal_pos is not None:
+                compressed = self._astar(
+                    self.start_pos,
+                    self.goal_pos,
+                    start_tmod20=0,
+                    require_safe=True
+                )
+
+            if compressed:
+                if not self.optimal_path or len(compressed) < len(self.optimal_path):
+                    self.optimal_path = compressed
+            else:
+                if not self.optimal_path or len(successful_trace) < len(self.optimal_path):
+                    self.optimal_path = successful_trace
 
         # If we batched actions, only keep facts that are actually safe to infer.
         # Do NOT try to localize which exact intermediate action caused the event.
@@ -454,9 +512,13 @@ class HybridAgent:
             if pad != new_pos:
                 self.teleports[pad] = new_pos
                 self.teleports[new_pos] = pad
-            self.action_queue = []
+
+            self._record_safe_move(self.prev_pos, self.prev_action, new_pos, teleported=True)
+
             if self.phase == 2:
-                self.phase = 1
+                print(f"[REPLAY SPECIAL] teleport to {new_pos}, continuing replay")
+            else:
+                self.action_queue = []
 
         # ── CONFUSION ─────────────────────────────────────────────────────────
         if result.is_confused:
@@ -465,9 +527,11 @@ class HybridAgent:
             self.episode_confused += 1
             if self.phase == 1 and self.prev_pos and self.prev_action is not None:
                 self._update_q(self.prev_pos, self.prev_action, -5, new_pos)
-            self.action_queue = []
+
             if self.phase == 2:
-                self.phase = 1
+                print(f"[REPLAY SPECIAL] confusion at {new_pos}, continuing replay")
+            else:
+                self.action_queue = []
 
         # ── GOAL ──────────────────────────────────────────────────────────────
         if result.is_goal_reached:
@@ -489,6 +553,7 @@ class HybridAgent:
                 print(f"\n  ★ Goal found at {new_pos}! Switching to REPLAY MODE.")
                 print(f"  ★ Replay path : {steps} steps ({steps//5 + 1} turns)")
 
+            self._record_safe_move(self.prev_pos, self.prev_action, new_pos, teleported=result.teleported)
             self._advance_internal_clock(result.actions_executed)
             return
 
@@ -500,6 +565,7 @@ class HybridAgent:
         self.episode_visited.add(new_pos)
         self.episode_cells.append(new_pos)
         self.current_pos = new_pos
+        self._record_safe_move(self.prev_pos, self.prev_action, new_pos, teleported=result.teleported)
         self._advance_internal_clock(result.actions_executed)
 
     # ─────────────────────────────────────────────────────────────────────────
