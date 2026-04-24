@@ -8,7 +8,7 @@ from visualizer import MazeVisualizer
 
 
 # ── SELECT MAZE HERE ───────────────────────────────
-MAZE_NAME = "alpha"   # change: "alpha" / "beta" / "gamma"
+MAZE_NAME = "beta"   # change: "alpha" / "beta" / "gamma"
 
 EPISODES       = 5
 TEST_EPISODES  = 5
@@ -143,44 +143,59 @@ def main():
         gif_skip=GIF_SKIP
     )
 
-    # ── Load Q-table ─────────────────────────────
-    if os.path.exists(SAVE_PATH):
-        agent.q_table = np.load(SAVE_PATH)
-        print("Loaded existing Q-table")
-    else:
-        print("Starting fresh Q-table")
-
     start_time = time.time()
 
-    # ── TRAIN ────────────────────────────────────
-    print("\n--- TRAIN ---\n")
+    # ── ALPHA: TRAIN + TEST ───────────────────────
+    if MAZE_NAME == "alpha":
 
-    train_results = run_episodes(
-        env, agent, viz,
-        EPISODES,
-        mode="train",
-        start_time=start_time
-    )
+        # ── Load Q-table only for alpha ───────────
+        if os.path.exists(SAVE_PATH):
+            agent.q_table = np.load(SAVE_PATH)
+            print("Loaded existing alpha Q-table")
+        else:
+            print("Starting fresh alpha Q-table")
 
-    np.save(SAVE_PATH, agent.q_table)
-    print_report(train_results, "TRAIN RESULTS")
+        print("\n--- TRAIN ---\n")
 
-    # ── TEST ─────────────────────────────────────
-    print("\n--- TEST ---\n")
+        train_results = run_episodes(
+            env, agent, viz,
+            EPISODES,
+            mode="train",
+            start_time=start_time
+        )
 
-    saved_epsilon = agent.epsilon
-    agent.epsilon = 0.0  # deterministic test
+        np.save(SAVE_PATH, agent.q_table)
+        print_report(train_results, "TRAIN RESULTS")
 
-    test_results = run_episodes(
-        env, agent, viz,
-        TEST_EPISODES,
-        mode="test",
-        start_time=start_time
-    )
+        print("\n--- TEST ---\n")
 
-    agent.epsilon = saved_epsilon
+        saved_epsilon = agent.epsilon
+        agent.epsilon = 0.0  # deterministic test only for alpha
 
-    print_report(test_results, "TEST RESULTS")
+        test_results = run_episodes(
+            env, agent, viz,
+            TEST_EPISODES,
+            mode="test",
+            start_time=start_time
+        )
+
+        agent.epsilon = saved_epsilon
+
+        print_report(test_results, "TEST RESULTS")
+
+    # ── BETA/GAMMA: TEST ONLY, BUT STILL EXPLORE ──
+    else:
+        print(f"Testing {MAZE_NAME} with a fresh agent state")
+        print("\n--- TEST ---\n")
+
+        test_results = run_episodes(
+            env, agent, viz,
+            EPISODES,
+            mode="test",
+            start_time=start_time
+        )
+
+        print_report(test_results, "TEST RESULTS")
 
     print("\nDone. Check runs/ folder.\n")
 
