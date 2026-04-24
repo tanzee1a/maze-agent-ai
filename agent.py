@@ -40,6 +40,7 @@ class HybridAgent:
         self.walls:     Set[Tuple] = set()   # (row, col, action)
         self.teleports: Dict[Tuple, Tuple] = {}
         self.confuse:   Set[Tuple] = set()
+        self.push_tiles: Dict[Tuple[int, int], int] = {}
 
         # Fire is not static. Learn dangerous cells by fire phase.
         self.dead_cells_by_phase: Dict[int, Set[Tuple[int, int]]] = {
@@ -122,7 +123,6 @@ class HybridAgent:
 
         # Decay epsilon each episode: agent exploits Q-table more over time
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
-        print(f"  [RL] epsilon={self.epsilon:.4f}")
 
         if self.phase == 2 and self.optimal_path:
             self.action_queue = list(self.optimal_path)
@@ -184,6 +184,8 @@ class HybridAgent:
 
             if pad in self.teleports:
                 break
+            if pad in self.push_tiles:
+                break
             if (nr, nc) in self.confuse:
                 break
 
@@ -240,8 +242,20 @@ class HybridAgent:
         if not self._in_bounds(nr, nc):
             return None
 
-        # teleport happens immediately on landing
+        # Maze-gamma directional push hazards resolve immediately on landing.
+        # Assumption: each push tile forces at most one extra move inside the
+        # same submitted action; it does not consume another atomic action.
         pad = (nr, nc)
+        if pad in self.push_tiles:
+            push_action = self.push_tiles[pad]
+            if (nr, nc, push_action) not in self.walls:
+                pdr, pdc = DELTAS[push_action]
+                fr, fc = nr + pdr, nc + pdc
+                if self._in_bounds(fr, fc):
+                    nr, nc = fr, fc
+            pad = (nr, nc)
+
+        # teleport happens immediately on landing
         if pad in self.teleports:
             nr, nc = self.teleports[pad]
 
@@ -471,8 +485,8 @@ class HybridAgent:
                 if self.phase == 1:
                     self.phase = 2
                     steps = len(self.optimal_path)
-                    print(f"\n  ★ Goal found at {new_pos}! Switching to REPLAY MODE.")
-                    print(f"  ★ Replay path : {steps} steps ({steps//5 + 1} turns)")
+                    print(f"\nGoal found at {new_pos}!")
+                    print(f"Replay path : {steps} steps ({steps//5 + 1} turns)")
 
                 self._advance_internal_clock(result.actions_executed)
                 return
@@ -487,12 +501,13 @@ class HybridAgent:
             self._remember_position(new_pos)
 
             # if something unexpected happened in a batched turn, drop back to cautious mode
-            if result.wall_hits > 0 or result.teleported or result.is_confused:
+            if result.wall_hits > 0 or result.teleported or result.is_confused or result.was_forced:
                 print(
                     f"[REPLAY BREAK] "
                     f"pos={new_pos} "
                     f"wall_hits={result.wall_hits} "
                     f"teleported={result.teleported} "
+                    f"forced={result.was_forced} "
                     f"confused={result.is_confused} "
                     f"actions_executed={result.actions_executed} "
                     f"remaining_replay={len(self.action_queue)}"
@@ -541,7 +556,7 @@ class HybridAgent:
             self._record_safe_move(self.prev_pos, self.prev_action, new_pos, teleported=True)
 
             if self.phase == 2:
-                print(f"[REPLAY SPECIAL] teleport to {new_pos}, continuing replay")
+                print(f"[REPLAY] teleport to {new_pos}")
             else:
                 self.action_queue = []
 
@@ -554,7 +569,27 @@ class HybridAgent:
                 self._update_q(self.prev_pos, self.prev_action, -5, new_pos)
 
             if self.phase == 2:
-                print(f"[REPLAY SPECIAL] confusion at {new_pos}, continuing replay")
+                print(f"[REPLAY] confusion at {new_pos}")
+            else:
+                self.action_queue = []
+
+        # ── DIRECTIONAL PUSH (Maze-gamma) ─────────────────────────────────────
+        if result.was_forced and self.prev_pos and self.prev_action is not None:
+            dr, dc = DELTAS[self.prev_action]
+            push_cell = (self.prev_pos[0] + dr, self.prev_pos[1] + dc)
+            self.push_tiles[push_cell] = result.forced_direction
+
+            pdr, pdc = DELTAS[result.forced_direction]
+            forced_dest = (push_cell[0] + pdr, push_cell[1] + pdc)
+            if new_pos == push_cell:
+                self.walls.add((push_cell[0], push_cell[1], result.forced_direction))
+                if self._in_bounds(*forced_dest):
+                    self.walls.add((forced_dest[0], forced_dest[1], INVERT[result.forced_direction]))
+            else:
+                self.safe_moves.add((push_cell[0], push_cell[1], result.forced_direction))
+
+            if self.phase == 2:
+                print(f"[REPLAY] push at {push_cell} dir={result.forced_direction}, continuing replay")
             else:
                 self.action_queue = []
 
@@ -575,10 +610,15 @@ class HybridAgent:
             if self.phase == 1:
                 self.phase = 2
                 steps = len(self.optimal_path)
-                print(f"\n  ★ Goal found at {new_pos}! Switching to REPLAY MODE.")
-                print(f"  ★ Replay path : {steps} steps ({steps//5 + 1} turns)")
+                print(f"\nGoal found at {new_pos}!")
+                print(f"Replay path : {steps} steps ({steps//5 + 1} turns)")
 
-            self._record_safe_move(self.prev_pos, self.prev_action, new_pos, teleported=result.teleported)
+            self._record_safe_move(
+                self.prev_pos,
+                self.prev_action,
+                new_pos,
+                teleported=(result.teleported or result.was_forced)
+            )
             self._advance_internal_clock(result.actions_executed)
             return
 
@@ -590,7 +630,12 @@ class HybridAgent:
         self.episode_visited.add(new_pos)
         self.episode_cells.append(new_pos)
         self.current_pos = new_pos
-        self._record_safe_move(self.prev_pos, self.prev_action, new_pos, teleported=result.teleported)
+        self._record_safe_move(
+            self.prev_pos,
+            self.prev_action,
+            new_pos,
+            teleported=(result.teleported or result.was_forced)
+        )
         self._advance_internal_clock(result.actions_executed)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -639,33 +684,16 @@ class HybridAgent:
                 replanned = self._plan_to_goal()
                 if replanned:
                     self.action_queue = replanned
-                    print(
-                        f"[REPLAY REPLAN] "
-                        f"pos={self.current_pos} → goal={self.goal_pos} "
-                        f"steps={len(replanned)}"
-                    )
 
             if self.action_queue:
                 trusted = self._trusted_prefix(self.action_queue, max_len=5)
 
                 if trusted:
                     self.action_queue = self.action_queue[len(trusted):]
-                    print(
-                        f"[REPLAY SEND] "
-                        f"batch={trusted} "
-                        f"remaining_after_send={len(self.action_queue)} "
-                        f"pos={self.current_pos}"
-                    )
                     return self._submit(trusted)
 
                 # If next replay segment is risky, replay one action at a time
                 next_step = self.action_queue.pop(0)
-                print(
-                    f"[REPLAY SEND 1] "
-                    f"step={[next_step]} "
-                    f"remaining_after_send={len(self.action_queue)} "
-                    f"pos={self.current_pos}"
-                )
                 return self._submit([next_step])
 
             # Replay finished or failed AND replan found nothing usable.
@@ -689,7 +717,6 @@ class HybridAgent:
                             best_q = q
                             best_action = a
                 if best_action is not None:
-                    print(f"  [RL] exploit Q-table: action={best_action} q={best_q:.2f} ε={self.epsilon:.3f}")
                     return self._submit([best_action])
             # ── Explore: Q-biased BFS toward nearest unvisited cell ───────────
             self.action_queue = self._bfs_explore()
@@ -772,6 +799,7 @@ class HybridAgent:
             "deaths_mapped":    sum(len(cells) for cells in self.dead_cells_by_phase.values()),
             "teleports_mapped": len(self.teleports) // 2,
             "confuse_mapped":   len(self.confuse),
+            "push_mapped":      len(self.push_tiles),
         }
 
     def print_metrics(self) -> None:
