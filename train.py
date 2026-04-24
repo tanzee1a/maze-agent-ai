@@ -17,8 +17,20 @@ parser.add_argument(
 parser.add_argument(
     "--episodes", "-e",
     type=int,
-    default=50,
-    help="Number of TRAINING episodes for maze-alpha (default: 50, ignored for beta/gamma)"
+    default=5,
+    help="Number of TRAINING episodes for maze-alpha (default: 5, ignored for beta/gamma)"
+)
+parser.add_argument(
+    "--gif-skip", "-g",
+    type=int,
+    default=200,
+    help="Capture every Nth step as a GIF frame (default: 200, higher = smaller file)"
+)
+parser.add_argument(
+    "--gif-fps", "-f",
+    type=int,
+    default=12,
+    help="GIF playback speed in frames per second (default: 12)"
 )
 args = parser.parse_args()
 
@@ -28,7 +40,6 @@ MAZE_DIR       = os.path.join("TestMazes", f"maze-{MAZE_NAME}")
 MAZE_PATH      = os.path.join(MAZE_DIR, "MAZE_0.png")
 HAZARD_PATH    = os.path.join(MAZE_DIR, "MAZE_1.png")
 
-# Outputs live outside TestMazes so they're easy to wipe between runs
 RUN_DIR        = os.path.join("runs", MAZE_NAME)
 VIZ_DIR        = os.path.join(RUN_DIR, "viz")
 SAVE_PATH      = os.path.join(RUN_DIR, "q_table.npy")
@@ -38,11 +49,6 @@ MAX_TURNS      = 10_000
 
 
 def run_episodes(env, agent, viz, num_episodes, mode, start_time, episode_offset=0, freeze_epsilon=False):
-    """
-    Run a block of episodes. mode is either 'train' or 'test'.
-    freeze_epsilon=True locks epsilon at 0 (pure exploitation of a trained policy).
-    Returns a list of per-episode stat dicts.
-    """
     assert mode in ("train", "test")
 
     saved_epsilon = None
@@ -58,22 +64,33 @@ def run_episodes(env, agent, viz, num_episodes, mode, start_time, episode_offset
         start_pos   = env.reset()
         agent.reset_episode(start_pos)
         if freeze_epsilon:
-            agent.epsilon = 0.0     # keep pinned after reset
+            agent.epsilon = 0.0
 
         last_result = None
         success     = False
         path_taken  = [start_pos]
         death_cells = []
+        step_count  = 0
 
         for turn in range(MAX_TURNS):
             actions     = agent.plan_turn(last_result)
             last_result = env.step(actions)
 
             path_taken.append(last_result.current_position)
+            step_count += 1
 
             if last_result.is_dead:
                 death_cells.append(last_result.current_position)
                 agent.current_pos = env.start
+
+            # ── Capture frame for GIF (every step, visualizer applies skip) ──
+            viz.capture_frame(
+                agent        = agent,
+                env          = env,
+                path_so_far  = path_taken,
+                deaths_so_far= death_cells,
+                episode_num  = episode_num,
+            )
 
             if last_result.is_goal_reached:
                 agent._process_result(last_result)
@@ -102,6 +119,7 @@ def run_episodes(env, agent, viz, num_episodes, mode, start_time, episode_offset
             f"t={elapsed:.0f}s"
         )
 
+        # ── Save JPEG + GIF, clear frame buffer ───────────────────────────────
         viz.save_episode(
             episode_num = episode_num,
             agent       = agent,
@@ -154,18 +172,17 @@ def main():
     print(f"Hazard: {HAZARD_PATH}")
     print(f"Viz:    {VIZ_DIR}/")
     print(f"Q-save: {SAVE_PATH}")
+    print(f"GIF:    skip={args.gif_skip}  fps={args.gif_fps}")
     print()
 
-    # Alpha gets train + test folders; beta/gamma only need test
     if MAZE_NAME == "alpha":
         os.makedirs(os.path.join(VIZ_DIR, "train"), exist_ok=True)
     os.makedirs(os.path.join(VIZ_DIR, "test"), exist_ok=True)
 
     env   = MazeEnvironment(MAZE_PATH, HAZARD_PATH)
     agent = HybridAgent()
-    viz   = MazeVisualizer(MAZE_PATH)
+    viz   = MazeVisualizer(MAZE_PATH, gif_fps=args.gif_fps, gif_skip=args.gif_skip)
 
-    # ── Load existing Q-table (alpha only) ───────────────────────────────────
     if MAZE_NAME == "alpha" and os.path.exists(SAVE_PATH):
         agent.q_table = np.load(SAVE_PATH)
         print(f"Loaded Q-table from {SAVE_PATH}  (non-zero entries: {np.count_nonzero(agent.q_table)})")
@@ -174,7 +191,6 @@ def main():
 
     start_time = time.time()
 
-    # ── Training (alpha only, unlimited episodes) ─────────────────────────────
     if MAZE_NAME == "alpha":
         num_train = args.episodes
         print(f"\n-- TRAINING  ({num_train} episodes) --")
@@ -186,9 +202,6 @@ def main():
         print(f"\nQ-table saved -> {SAVE_PATH}")
         print_report(train_results, "TRAINING")
 
-    # ── Test (5 episodes for all mazes) ───────────────────────────────────────
-    # Alpha:      freeze epsilon=0 to exploit the trained policy.
-    # Beta/gamma: no prior training, keep epsilon active so the agent can explore.
     is_alpha  = MAZE_NAME == "alpha"
     train_eps = args.episodes if is_alpha else 0
     eps_note  = "e=0 exploit" if is_alpha else "e active, exploring"
@@ -206,4 +219,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
