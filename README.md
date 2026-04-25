@@ -1,4 +1,4 @@
-# Maze Agent AI
+# Team 8 Maze Agent
 
 This project implements a maze-solving agent for a 64x64 maze environment with walls, fire hazards, confusion traps, and teleporters.
 
