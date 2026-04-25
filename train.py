@@ -7,7 +7,7 @@ from environment import MazeEnvironment
 from visualizer import MazeVisualizer
 
 
-# ── SELECT MAZE HERE ───────────────────────────────
+# SELECT MAZE HERE 
 MAZE_NAME = "beta"   # change: "alpha" / "beta" / "gamma"
 
 EPISODES       = 5
@@ -16,8 +16,6 @@ MAX_TURNS      = 10_000
 GIF_SKIP       = 200
 GIF_FPS        = 12
 
-
-# ── PATHS ──────────────────────────────────────────
 MAZE_DIR  = os.path.join("TestMazes", f"maze-{MAZE_NAME}")
 MAZE_PATH = os.path.join(MAZE_DIR, "MAZE_0.png")
 
@@ -26,9 +24,6 @@ VIZ_DIR   = os.path.join(RUN_DIR, "viz")
 SAVE_PATH = os.path.join(RUN_DIR, "q_table.npy")
 
 
-# ───────────────────────────────────────────────────
-# RUN EPISODES
-# ───────────────────────────────────────────────────
 def run_episodes(env, agent, viz, num_episodes, mode, start_time):
 
     results = []
@@ -58,7 +53,6 @@ def run_episodes(env, agent, viz, num_episodes, mode, start_time):
                 agent.current_pos = env.start
                 current_segment = [env.start]
 
-            # ── CAPTURE FRAME ───────────────────────
             viz.capture_frame(
                 agent=agent,
                 env=env,
@@ -88,7 +82,6 @@ def run_episodes(env, agent, viz, num_episodes, mode, start_time):
             f"e={m['epsilon']:.3f}"
         )
 
-        # ── SAVE GIF + PNG ────────────────────────
         viz.save_episode(
             episode_num=ep,
             agent=agent,
@@ -110,10 +103,6 @@ def run_episodes(env, agent, viz, num_episodes, mode, start_time):
 
     return results
 
-
-# ───────────────────────────────────────────────────
-# REPORT
-# ───────────────────────────────────────────────────
 def print_report(results, label, agent=None):
     print("\n" + "=" * 50)
     print(label)
@@ -122,13 +111,13 @@ def print_report(results, label, agent=None):
     successes    = [r for r in results if r["success"]]
     success_rate = len(successes) / len(results) * 100
 
-    # avg path length and avg turns: successful episodes only (per spec)
+    # avg path length and avg turns: successful episodes only
     path_lengths = [r["path_length"] for r in successes if r["path_length"] is not None]
     succ_turns   = [r["turns"] for r in successes]
     avg_path     = np.mean(path_lengths) if path_lengths else float("nan")
     avg_turns    = np.mean(succ_turns)   if succ_turns   else float("nan")
 
-    # death rate: total_deaths / total_turns across all episodes (per spec)
+    # death rate: total_deaths / total_turns across all episodes
     total_deaths = sum(r["deaths"] for r in results)
     total_turns  = sum(r["turns"]  for r in results)
     death_rate   = total_deaths / total_turns if total_turns > 0 else float("nan")
@@ -140,16 +129,12 @@ def print_report(results, label, agent=None):
     print(f"Death rate:     {death_rate:.5f}  (total_deaths / total_turns)")
 
     if agent is not None:
-        # Exploration efficiency: unique cells seen / total cell visits across these episodes
-        # Both from env stats so they cover the same scope. Max 1.0 = zero revisits.
         total_cell_visits  = sum(r["cells_visited"]  for r in results)
         total_cells_unique = sum(r["cells_explored"] for r in results)
         expl_eff           = total_cells_unique / total_cell_visits if total_cell_visits > 0 else float("nan")
 
-        # Map completeness: fraction of full grid discovered
         map_complete = agent.get_metrics()["map_completeness"]
 
-        # Learning efficiency: which episode the goal was first found
         first_success = next((r["episode"] for r in results if r["success"]), None)
 
         print(f"Exploration eff:  {expl_eff:.3f}  (unique / total cell visits)")
@@ -162,9 +147,6 @@ def print_report(results, label, agent=None):
     print("=" * 50)
 
 
-# ───────────────────────────────────────────────────
-# MAIN
-# ───────────────────────────────────────────────────
 def main():
     print(f"\n=== RUNNING MAZE: {MAZE_NAME.upper()} ===\n")
 
@@ -182,10 +164,9 @@ def main():
 
     start_time = time.time()
 
-    # ── ALPHA: TRAIN + TEST ───────────────────────
+    # ALPHA: TRAIN + TEST
     if MAZE_NAME == "alpha":
 
-        # ── Load Q-table only for alpha ───────────
         if os.path.exists(SAVE_PATH):
             agent.q_table = np.load(SAVE_PATH)
             print("Loaded existing alpha Q-table")
@@ -220,7 +201,7 @@ def main():
 
         print_report(test_results,  "TEST RESULTS",  agent=agent)
 
-    # ── BETA/GAMMA: TEST ONLY, BUT STILL EXPLORE ──
+    # BETA/GAMMA: TEST ONLY
     else:
         print(f"Testing {MAZE_NAME} with a fresh agent state")
         print("\n--- TEST ---\n")
@@ -236,7 +217,5 @@ def main():
 
     print("\nDone. Check runs/ folder.\n")
 
-
-# ───────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
