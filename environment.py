@@ -211,7 +211,7 @@ class MazeEnvironment:
             # teleport
             if self.agent_pos in self.teleport_map:
                 self.agent_pos = self.teleport_map[self.agent_pos]
-                self.cells_visited.append(self.agent_pos)
+                # self.cells_visited.append(self.agent_pos)
                 result.teleported = True
                 cell_hazard = self.hazards.get(self.agent_pos)
 

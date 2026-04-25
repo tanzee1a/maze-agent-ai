@@ -8,7 +8,7 @@ from visualizer import MazeVisualizer
 
 
 # ── SELECT MAZE HERE ───────────────────────────────
-MAZE_NAME = "beta"   # change: "alpha" / "beta" / "gamma"
+MAZE_NAME = "gamma"   # change: "alpha" / "beta" / "gamma"
 
 EPISODES       = 5
 TEST_EPISODES  = 5
@@ -99,10 +99,13 @@ def run_episodes(env, agent, viz, num_episodes, mode, start_time):
         )
 
         results.append({
-            "episode": ep,
-            "success": success,
-            "turns": stats["turns_taken"],
-            "deaths": stats["deaths"],
+            "episode":     ep,
+            "success":     success,
+            "turns":       stats["turns_taken"],
+            "deaths":      stats["deaths"],
+            "path_length": stats["path_length"] if success else None,  # cells visited, no teleport jumps
+            "cells_explored": stats["cells_explored"],  # unique cells this episode
+            "cells_visited":  stats["path_length"],        # total visits this episode (incl. revisits)
         })
 
     return results
@@ -111,17 +114,51 @@ def run_episodes(env, agent, viz, num_episodes, mode, start_time):
 # ───────────────────────────────────────────────────
 # REPORT
 # ───────────────────────────────────────────────────
-def print_report(results, label):
+def print_report(results, label, agent=None):
     print("\n" + "=" * 50)
     print(label)
     print("=" * 50)
 
-    successes = [r for r in results if r["success"]]
+    successes    = [r for r in results if r["success"]]
+    success_rate = len(successes) / len(results) * 100
 
-    print(f"Episodes:     {len(results)}")
-    print(f"Success rate: {len(successes) / len(results) * 100:.1f}%")
-    print(f"Avg turns:    {np.mean([r['turns'] for r in results]):.1f}")
-    print(f"Avg deaths:   {np.mean([r['deaths'] for r in results]):.1f}")
+    # avg path length and avg turns: successful episodes only (per spec)
+    path_lengths = [r["path_length"] for r in successes if r["path_length"] is not None]
+    succ_turns   = [r["turns"] for r in successes]
+    avg_path     = np.mean(path_lengths) if path_lengths else float("nan")
+    avg_turns    = np.mean(succ_turns)   if succ_turns   else float("nan")
+
+    # death rate: total_deaths / total_turns across all episodes (per spec)
+    total_deaths = sum(r["deaths"] for r in results)
+    total_turns  = sum(r["turns"]  for r in results)
+    death_rate   = total_deaths / total_turns if total_turns > 0 else float("nan")
+
+    print(f"Episodes:       {len(results)}")
+    print(f"Success rate:   {success_rate:.1f}%")
+    print(f"Avg path len:   {avg_path:.1f}  (successful only)")
+    print(f"Avg turns:      {avg_turns:.1f}  (successful only)")
+    print(f"Death rate:     {death_rate:.5f}  (total_deaths / total_turns)")
+
+    if agent is not None:
+        # Exploration efficiency: unique cells seen / total cell visits across these episodes
+        # Both from env stats so they cover the same scope. Max 1.0 = zero revisits.
+        total_cell_visits  = sum(r["cells_visited"]  for r in results)
+        total_cells_unique = sum(r["cells_explored"] for r in results)
+        expl_eff           = total_cells_unique / total_cell_visits if total_cell_visits > 0 else float("nan")
+
+        # Map completeness: fraction of full grid discovered
+        map_complete = agent.get_metrics()["map_completeness"]
+
+        # Learning efficiency: which episode the goal was first found
+        first_success = next((r["episode"] for r in results if r["success"]), None)
+
+        print(f"Exploration eff:  {expl_eff:.3f}  (unique / total cell visits)")
+        print(f"Map completeness: {map_complete * 100:.1f}%")
+        if first_success:
+            print(f"First success:    episode {first_success}")
+        else:
+            print(f"First success:    never")
+
     print("=" * 50)
 
 
@@ -165,7 +202,7 @@ def main():
         )
 
         np.save(SAVE_PATH, agent.q_table)
-        print_report(train_results, "TRAIN RESULTS")
+        print_report(train_results, "TRAIN RESULTS", agent=agent)
 
         print("\n--- TEST ---\n")
 
@@ -181,7 +218,7 @@ def main():
 
         agent.epsilon = saved_epsilon
 
-        print_report(test_results, "TEST RESULTS")
+        print_report(test_results,  "TEST RESULTS",  agent=agent)
 
     # ── BETA/GAMMA: TEST ONLY, BUT STILL EXPLORE ──
     else:
@@ -195,7 +232,7 @@ def main():
             start_time=start_time
         )
 
-        print_report(test_results, "TEST RESULTS")
+        print_report(test_results,  "TEST RESULTS",  agent=agent)
 
     print("\nDone. Check runs/ folder.\n")
 
