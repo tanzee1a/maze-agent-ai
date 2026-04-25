@@ -1,43 +1,9 @@
-"""
-maze_reader.py
-==============
-Loads and inspects a maze image pair:
-  - MAZE_0.png  →  wall layout
-  - MAZE_1.png  →  hazard overlay
-
-Public API
-----------
-load_maze(path)                           → (image_array, h_walls, v_walls)
-find_start_goal(h_walls)                  → (start, goal)
-get_start(h_walls)                        → (row, col)
-get_goal(h_walls)                         → (row, col)
-
-load_hazards(path)                        → {(row, col): Hazard}
-print_summary(h_walls, hazards)           → prints maze summary
-
-cell_center(row, col)                     → (x, y) pixel coords of cell centre
-
-# Movement
-in_bounds(row, col)                       → bool
-can_move(row, col, direction, ...)        → bool
-
-# Hazards (simplified)
-if_alive(row, col, hazards)               → bool
-get_hazard(row, col, hazards)             → Hazard | None
-
-# Dynamic fire
-update_fire_in_hazards(hazards, fire_groups_full) → (updated hazards, fire_groups_full)
-"""
-
 from collections import Counter
 from enum import Enum
 
 import numpy as np
 from PIL import Image
 
-# ---------------------------------------------------------------------------
-# Grid constants
-# ---------------------------------------------------------------------------
 GRID  = 64   # cells per side
 WALL  = 2    # wall-strip width in pixels
 STEP  = 16   # pixels per cell (wall shared between neighbours)
@@ -45,18 +11,11 @@ INNER = STEP - WALL  # inner cell width in pixels
 ARM_LENGTH = 3  # fire arm length in cells
 
 
-
-# ---------------------------------------------------------------------------
-# Actions & directions
-# ---------------------------------------------------------------------------
 ACTION_DELTAS   = {0: (-1, 0), 1: (0, 1), 2: (1, 0), 3: (0, -1)}
 ACTIONS         = list(ACTION_DELTAS.keys())
 REVERSE_ACTION  = {0: 2, 1: 3, 2: 0, 3: 1}
 ACTION_NAMES    = {0: "UP", 1: "RIGHT", 2: "DOWN", 3: "LEFT"}
 
-# ---------------------------------------------------------------------------
-# Hazard definitions
-# ---------------------------------------------------------------------------
 class Hazard(Enum):
     FIRE       = "fire"
     CONFUSION  = "confusion"
@@ -74,18 +33,12 @@ HAZARD_LABELS = {
     Hazard.TP_RED:    "TP_RED",
 }
 
-# ---------------------------------------------------------------------------
-# Coordinate helpers
-# ---------------------------------------------------------------------------
 def cell_center(row, col):
     """Return pixel (x, y) at the centre of cell (row, col)."""
     x = WALL + col * STEP + INNER // 2
     y = WALL + row * STEP + INNER // 2
     return x, y
 
-# ---------------------------------------------------------------------------
-# Wall loading
-# ---------------------------------------------------------------------------
 def load_maze(path="MAZE_0.png"):
     image = np.array(Image.open(path).convert("RGB"))
     black = np.zeros(3, dtype=np.uint8)
@@ -111,24 +64,12 @@ def load_maze(path="MAZE_0.png"):
 
 
 def find_start_goal(h_walls):
-    """
-    Find the open entry gap (bottom edge) and exit gap (top edge).
-
-    Returns
-    -------
-    start : (row, col)
-    goal  : (row, col)
-    """
     start = (GRID - 1, int(np.where(~h_walls[-1])[0][0]))
     goal  = (0,        int(np.where(~h_walls[0])[0][0]))
     return start, goal
 
 
-# ---------------------------------------------------------------------------
-# Hazard loading
-# ---------------------------------------------------------------------------
 def _classify_color(r, g, b):
-    """Map an average RGB value to a Hazard type, or None if unrecognised."""
 
     # confusion
     if 155 <= r <= 195 and 110 <= g <= 160 and 55 <= b <= 85:
@@ -157,15 +98,6 @@ def _classify_color(r, g, b):
 
 
 def load_hazards(path="MAZE_1.png"):
-    """
-    Detect hazard type for every cell by sampling a 10×10 pixel patch
-    around the cell centre, filtering out background pixels, then
-    classifying the remaining colour.
-
-    Returns
-    -------
-    hazards : dict  {(row, col): Hazard}
-    """
     img = np.array(Image.open(path).convert("RGB"))
     hazards = {}
 
@@ -191,22 +123,13 @@ def load_hazards(path="MAZE_1.png"):
 
     return hazards
 
-# ---------------------------------------------------------------------------
-# Teleportation Matcher
-# ---------------------------------------------------------------------------
 def get_teleport_points(hazards):
-    """
-    Return teleporter cells grouped by color.
-    """
     return {
         Hazard.TP_GREEN: sorted([cell for cell, hz in hazards.items() if hz == Hazard.TP_GREEN]),
         Hazard.TP_YELLOW: sorted([cell for cell, hz in hazards.items() if hz == Hazard.TP_YELLOW]),
         Hazard.TP_PURPLE: sorted([cell for cell, hz in hazards.items() if hz == Hazard.TP_PURPLE]),
         Hazard.TP_RED : sorted([cell for cell, hz in hazards.items() if hz == Hazard.TP_RED]),
     }
-# ---------------------------------------------------------------------------
-# Dynamic fire helpers
-# ---------------------------------------------------------------------------
 
 def find_fire_groups(fire_cells):
     fire_cells = set(fire_cells)
@@ -236,9 +159,6 @@ def find_fire_groups(fire_cells):
     return groups
 
 def find_fire_corner(group):
-    """
-    Finds pivot even if it's outside the map.
-    """
     if not group:
         return None
 
@@ -257,7 +177,6 @@ def find_fire_corner(group):
                 if nbr in fire_set:
                     directions.setdefault((r, c), []).append((dr, dc))
 
-    # NORMAL CASE → find V corner
     for cell, dirs in directions.items():
         if len(dirs) < 2:
             continue
@@ -272,8 +191,6 @@ def find_fire_corner(group):
                 if dot == 0:
                     return cell
 
-    # EDGE CASE → only one direction visible
-    # tip + arm_length steps toward the arm = pivot (one beyond the root)
     for cell, dirs in directions.items():
         if len(dirs) == 1:
             r, c = cell
@@ -354,7 +271,6 @@ def init_fire_groups(hazards):
 
 
 def update_fire_in_hazards(hazards, fire_groups_full):
-    # remove old fire
     new_hazards = {
         cell: hz for cell, hz in hazards.items()
         if hz != Hazard.FIRE
@@ -372,15 +288,9 @@ def update_fire_in_hazards(hazards, fire_groups_full):
 
     return new_hazards, new_fire_groups
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def get_teleport_pairs(hazards):
-    """
-    Return teleporter pairs by color.
-    Assumes each color has exactly 2 cells.
-    """
     teleport_points = get_teleport_points(hazards)
     pairs = {}
 
@@ -417,28 +327,13 @@ def maze_turn(hazards, fire_groups=None):
     return new_hazards, new_fire_groups
 
 def get_fire_state(fire_groups):
-    """
-    Returns fire groups and their pivot locations.
-        [
-            {
-                "cells": set[(r,c)],
-                "pivot": (r,c)
-            },
-            ...
-        ]
-    """
     return [
         {"cells": group, "pivot": pivot}
         for group, pivot in fire_groups
     ]
 
 
-
-# ---------------------------------------------------------------------------
-# Query helpers / simple API
-# ---------------------------------------------------------------------------
 def in_bounds(row, col):
-    """Return True if (row, col) is a valid maze cell."""
     return 0 <= row < GRID and 0 <= col < GRID
 
 
@@ -490,9 +385,7 @@ def get_goal(h_walls):
     _, goal = find_start_goal(h_walls)
     return goal
 
-# ---------------------------------------------------------------------------
-# Summary printer
-# ---------------------------------------------------------------------------
+
 def print_summary(h_walls, hazards):
     start = get_start(h_walls)
     goal = get_goal(h_walls)
@@ -519,9 +412,6 @@ def print_summary(h_walls, hazards):
     print_teleport_pairs_exact(hazards)
 
 
-# ---------------------------------------------------------------------------
-# Entry point – run as script for a quick inspection
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import os
     import argparse
@@ -535,7 +425,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Base directory (safe no matter where you run from)
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
     MAZE_DIR  = os.path.join(BASE_DIR, "TestMazes", f"maze-{args.maze}")
@@ -546,15 +435,12 @@ if __name__ == "__main__":
     print(f"Maze file:    {MAZE_PATH}")
     print(f"Hazard file:  {HAZ_PATH}")
 
-    # Safety checks
     if not os.path.exists(MAZE_PATH):
         raise FileNotFoundError(f"Missing: {MAZE_PATH}")
     if not os.path.exists(HAZ_PATH):
         raise FileNotFoundError(f"Missing: {HAZ_PATH}")
 
-    # Load data
     image, h_walls, v_walls = load_maze(MAZE_PATH)
     hazards = load_hazards(HAZ_PATH)
 
-    # Print summary
     print_summary(h_walls, hazards)

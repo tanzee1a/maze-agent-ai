@@ -13,7 +13,7 @@ from maze_reader import (
     init_fire_groups
 )
 
-CELL = 12  # small = fast rendering
+CELL = 12
 
 COLORS = {
     "bg": (255, 255, 255),
@@ -80,10 +80,6 @@ def render_turns(h_walls, v_walls, start, goal, hazards, out_dir, steps=8):
 
         current, state = update_fire_in_hazards(current, state)
 
-
-# ---------------------------------------------------------------------------
-# MAIN (FIXED)
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(

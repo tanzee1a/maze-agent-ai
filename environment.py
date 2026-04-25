@@ -13,14 +13,12 @@ from maze_reader import (
     GRID,
 )
 
-# ── SAFE FALLBACK (push hazards not implemented yet) ────────────────────────
 def is_push_hazard(hz):
     return False
 
 def push_direction_for_hazard(hz):
     return (0, 0)
 
-# ── Action constants ────────────────────────────────────────────────────────
 ACTION_UP    = 0
 ACTION_DOWN  = 1
 ACTION_LEFT  = 2
@@ -50,7 +48,6 @@ INVERT_ACTION = {
     ACTION_RIGHT: ACTION_LEFT,
 }
 
-# ── TurnResult ──────────────────────────────────────────────────────────────
 class TurnResult:
     def __init__(self):
         self.wall_hits = 0
@@ -72,7 +69,6 @@ class TurnResult:
             f"confused={self.is_confused}, actions={self.actions_executed})"
         )
 
-# ── MazeEnvironment ─────────────────────────────────────────────────────────
 class MazeEnvironment:
 
     def __init__(self, maze_name="alpha"):
@@ -120,7 +116,6 @@ class MazeEnvironment:
         self.goal_reached = False
         self.episode_number = 0
 
-    # ────────────────────────────────────────────────────────────────────────
     def _build_teleport_map(self, hazards):
         teleport_map = {}
         pairs = get_teleport_pairs(hazards)
@@ -133,7 +128,6 @@ class MazeEnvironment:
 
         return teleport_map
 
-    # ────────────────────────────────────────────────────────────────────────
     def reset(self):
         self.hazards = dict(self.base_hazards)
         self.fire_pivots = init_fire_groups(self.hazards)
@@ -151,7 +145,6 @@ class MazeEnvironment:
         self.episode_number += 1
         return self.start
 
-    # ────────────────────────────────────────────────────────────────────────
     def _tick_fire_clock(self):
         self.atomic_action_count += 1
         if self.atomic_action_count % 5 == 0:
@@ -159,7 +152,6 @@ class MazeEnvironment:
                 self.hazards, self.fire_pivots
             )
 
-    # ────────────────────────────────────────────────────────────────────────
     def _apply_push_hazard(self, result, cell_hazard):
         if not is_push_hazard(cell_hazard):
             return cell_hazard
@@ -178,7 +170,6 @@ class MazeEnvironment:
 
         return self.hazards.get(self.agent_pos)
 
-    # ────────────────────────────────────────────────────────────────────────
     def step(self, actions: List[int]):
 
         result = TurnResult()
@@ -205,7 +196,6 @@ class MazeEnvironment:
 
             cell_hazard = self.hazards.get(self.agent_pos)
 
-            # push (safe)
             cell_hazard = self._apply_push_hazard(result, cell_hazard)
 
             # teleport
@@ -243,7 +233,6 @@ class MazeEnvironment:
         result.current_position = self.agent_pos
         return result
 
-    # ────────────────────────────────────────────────────────────────────────
     @property
     def turn(self):
         return self.atomic_action_count

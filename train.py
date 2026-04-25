@@ -8,7 +8,7 @@ from visualizer import MazeVisualizer
 
 
 # ── SELECT MAZE HERE ───────────────────────────────
-MAZE_NAME = "gamma"   # change: "alpha" / "beta" / "gamma"
+MAZE_NAME = "beta"   # change: "alpha" / "beta" / "gamma"
 
 EPISODES       = 5
 TEST_EPISODES  = 5

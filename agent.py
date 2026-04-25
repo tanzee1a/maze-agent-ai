@@ -36,7 +36,6 @@ class HybridAgent:
 
     def __init__(self):
 
-        # ── Permanent map (never clears) ──────────────────────────────────────
         self.walls:     Set[Tuple] = set()   # (row, col, action)
         self.teleports: Dict[Tuple, Tuple] = {}
         self.confuse:   Set[Tuple] = set()
@@ -46,13 +45,11 @@ class HybridAgent:
             0: set(), 1: set(), 2: set(), 3: set(),
         }
 
-        # ── Visited tracking ──────────────────────────────────────────────────
         self.visited:         Set[Tuple] = set()
         self.episode_visited: Set[Tuple] = set()
         self.episode_world_actions: List[int] = []
         self.safe_moves: Set[Tuple[int, int, int]] = set()
 
-        # ── Q-table ───────────────────────────────────────────────────────────
         self.q_table = np.zeros((GRID, GRID, 4), dtype=np.float32)
         self.alpha   = 0.2
         self.gamma   = 0.95
@@ -61,7 +58,6 @@ class HybridAgent:
         self.epsilon_min   = 0.05
         self.epsilon_decay = 0.995
 
-        # ── State ─────────────────────────────────────────────────────────────
         self.phase        = 1
         self.current_pos: Optional[Tuple] = None
         self.start_pos:   Optional[Tuple] = None
@@ -73,7 +69,6 @@ class HybridAgent:
         self.atomic_action_count = 0
         self.last_turn_start_tmod20 = 0
 
-        # ── Metrics ───────────────────────────────────────────────────────────
         self.total_episodes      = 0
         self.successful_episodes = 0
         self.total_turns_ever    = 0
@@ -89,10 +84,6 @@ class HybridAgent:
 
         self.last_planned_actions: List[int] = []
         self.last_submitted_actions: List[int] = []
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # RESET
-    # ─────────────────────────────────────────────────────────────────────────
 
     def reset_episode(self, start_pos: Tuple) -> None:
         self.last_planned_actions = []
@@ -236,10 +227,6 @@ class HybridAgent:
                 out.append((nr, nc, nt, action))
         return out
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # MAP
-    # ─────────────────────────────────────────────────────────────────────────
-
     def _in_bounds(self, r, c):
         return 0 <= r < GRID and 0 <= c < GRID
 
@@ -266,10 +253,6 @@ class HybridAgent:
                     nr, nc = self.teleports[(nr, nc)]
                 out.append((nr, nc, a))
         return out
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # PHASE 1 — Q-biased BFS exploration
-    # ─────────────────────────────────────────────────────────────────────────
 
     def _bfs_explore(self, ignore_fire=False) -> List[int]:
         if self.current_pos is None:
@@ -305,10 +288,6 @@ class HybridAgent:
 
         return []
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # PHASE 2 — A*
-    # ─────────────────────────────────────────────────────────────────────────
-
     def _astar(self, start, goal, start_tmod20=None, ignore_fire=False, require_safe=False) -> List[int]:
         if not start or not goal:
             return []
@@ -341,10 +320,6 @@ class HybridAgent:
 
         return []
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Q-TABLE
-    # ─────────────────────────────────────────────────────────────────────────
-
     def _update_q(self, prev, action, reward, new):
         if action not in MOVE_ACTIONS:
             return
@@ -353,10 +328,6 @@ class HybridAgent:
         old    = self.q_table[r, c, action]
         best_n = float(np.max(self.q_table[nr, nc]))
         self.q_table[r, c, action] = old + self.alpha * (reward + self.gamma * best_n - old)
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # PROCESS RESULT
-    # ─────────────────────────────────────────────────────────────────────────
 
     def _process_result(self, result) -> None:
         new_pos = result.current_position
@@ -434,7 +405,6 @@ class HybridAgent:
             self._advance_internal_clock(result.actions_executed)
             return
 
-        # ── WALL ──────────────────────────────────────────────────────────────
         if result.wall_hits > 0 and self.prev_pos and self.prev_action is not None:
             self.walls.add((*self.prev_pos, self.prev_action))
             dr, dc = DELTAS[self.prev_action]
@@ -447,7 +417,6 @@ class HybridAgent:
             self._advance_internal_clock(result.actions_executed)
             return
 
-        # ── DEATH ─────────────────────────────────────────────────────────────
         if result.is_dead:
             self._mark_fire_death(new_pos, death_tmod20)
             if self.phase == 1 and self.prev_pos and self.prev_action is not None:
@@ -461,7 +430,6 @@ class HybridAgent:
             self._advance_internal_clock(result.actions_executed)
             return
 
-        # ── TELEPORT ──────────────────────────────────────────────────────────
         if result.teleported and self.prev_pos and self.prev_action is not None:
             dr, dc = DELTAS[self.prev_action]
             pad = (self.prev_pos[0] + dr, self.prev_pos[1] + dc)
@@ -472,7 +440,6 @@ class HybridAgent:
             if self.phase != 2:
                 self.action_queue = []
 
-        # ── CONFUSION ─────────────────────────────────────────────────────────
         if result.is_confused:
             self.is_confused = not self.is_confused
             self.confuse.add(new_pos)
@@ -482,7 +449,6 @@ class HybridAgent:
             if self.phase != 2:
                 self.action_queue = []
 
-        # ── DIRECTIONAL PUSH ──────────────────────────────────────────────────
         if result.was_forced and self.prev_pos and self.prev_action is not None:
             dr, dc = DELTAS[self.prev_action]
             push_cell = (self.prev_pos[0] + dr, self.prev_pos[1] + dc)
@@ -498,7 +464,6 @@ class HybridAgent:
             if self.phase != 2:
                 self.action_queue = []
 
-        # ── GOAL ──────────────────────────────────────────────────────────────
         if result.is_goal_reached:
             self.goal_pos = new_pos
             if self.phase == 1 and self.prev_pos and self.prev_action is not None:
@@ -522,7 +487,6 @@ class HybridAgent:
             self._advance_internal_clock(result.actions_executed)
             return
 
-        # ── NORMAL MOVE ───────────────────────────────────────────────────────
         is_new = new_pos not in self.visited
         if self.phase == 1 and self.prev_pos and self.prev_action is not None:
             self._update_q(self.prev_pos, self.prev_action, +10 if is_new else -1, new_pos)
@@ -535,10 +499,6 @@ class HybridAgent:
             teleported=(result.teleported or result.was_forced)
         )
         self._advance_internal_clock(result.actions_executed)
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # PLAN TURN
-    # ─────────────────────────────────────────────────────────────────────────
 
     def _plan_to_goal(self) -> List[int]:
         if self.goal_pos is None or self.current_pos is None:
@@ -557,7 +517,7 @@ class HybridAgent:
         self.episode_turns += 1
         self.total_turns_ever += 1
 
-        # ── Phase 2: A* speed run ─────────────────────────────────────────────
+        # Phase 2: A* speed run 
         if self.phase == 2:
             if not self.action_queue:
                 replanned = self._plan_to_goal()
@@ -577,7 +537,7 @@ class HybridAgent:
                 next_step = self.action_queue.pop(0)
                 return self._submit([next_step])
 
-        # ── Phase 1: epsilon-greedy + BFS exploration ─────────────────────────
+        # Phase 1: epsilon-greedy + BFS exploration 
         if not self.action_queue:
             if self.current_pos is not None and random.random() > self.epsilon:
                 r, c = self.current_pos
@@ -625,10 +585,6 @@ class HybridAgent:
         self.last_submitted_actions = list(submitted)
         return submitted
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # BOOKKEEPING
-    # ─────────────────────────────────────────────────────────────────────────
-
     def _finish_episode(self, success: bool) -> None:
         if success:
             self.successful_episodes += 1
@@ -638,10 +594,6 @@ class HybridAgent:
 
     def finish_episode_timeout(self) -> None:
         self._finish_episode(success=False)
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # METRICS
-    # ─────────────────────────────────────────────────────────────────────────
 
     def get_metrics(self) -> dict:
         t, s = self.total_episodes, self.successful_episodes

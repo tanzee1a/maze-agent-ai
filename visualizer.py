@@ -18,13 +18,11 @@ class MazeVisualizer:
         self.discovered_cells = set()      # explored path
         self.discovered_hazards = set()   # ALL hazards ever seen
 
-    # ───────────────────────────────────────────────
     def _build_base_image(self, maze_path):
         img = Image.open(maze_path).convert("RGBA")
         img = img.resize((GRID * CELL_SIZE, GRID * CELL_SIZE))
         return img
 
-    # ───────────────────────────────────────────────
     def _generate_fire_phases(self, hazards, fire_groups):
         phases = []
 
@@ -39,14 +37,12 @@ class MazeVisualizer:
 
         return phases
 
-    # ───────────────────────────────────────────────
     def _render_phase_frame(self, env, hazards, fire_groups, path, deaths):
 
         frame = self.base_img.copy()
         overlay = Image.new("RGBA", frame.size, (0, 0, 0, 0))
         draw_overlay = ImageDraw.Draw(overlay)
 
-        # explored cells (subtle)
         for r, c in self.discovered_cells:
             x0 = c * CELL_SIZE
             y0 = r * CELL_SIZE
@@ -61,7 +57,6 @@ class MazeVisualizer:
         frame = Image.alpha_composite(frame, overlay)
         draw = ImageDraw.Draw(frame)
 
-        # FIRE (persist once seen)
         for group, pivot in fire_groups:
             pr, pc = pivot
 
@@ -135,7 +130,6 @@ class MazeVisualizer:
 
         return frame.convert("RGB")
 
-    # ───────────────────────────────────────────────
     def capture_frame(self, agent, env, path_so_far, deaths_so_far, episode_num):
 
         if env.turn % self.gif_skip != 0:
@@ -146,7 +140,6 @@ class MazeVisualizer:
         self.discovered_cells.update(path_so_far)
         self.discovered_cells.update(deaths_so_far)
 
-        # FIX: track ALL hazards seen this turn
         for cell, hz in env.hazards.items():
             if hz is not None:
                 self.discovered_hazards.add(cell)
@@ -159,7 +152,6 @@ class MazeVisualizer:
             )
             self.frames.append(frame)
 
-    # ───────────────────────────────────────────────
     def save_episode(self, episode_num, agent, env,
                      path_taken, death_cells, output_dir):
 
